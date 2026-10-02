@@ -5,6 +5,9 @@ import { clearActivity, createPost as createPostRequest, createRole as createRol
 import { permissionCatalog, readAdminData, readPosts, writeAdminData, writePosts } from './data/blogStore.js';
 
 const blankPost = { title: '', category: 'Creative work', type: 'Essay', readTime: '5 min read', description: '', author: '', image: '', alt: '', status: 'draft', featured: false, content: [''] };
+const LOCAL_ADMIN_EMAIL = 'naeemshar127@gmail.com';
+const LOCAL_ADMIN_PASSWORD = 'naeem24bs';
+const LOCAL_ADMIN_SESSION_KEY = 'field-notes.admin-auth';
 const navigation = [
     { id: 'overview', label: 'Overview', permission: 'posts.view' },
     { id: 'posts', label: 'Posts', permission: 'posts.view' },
@@ -26,6 +29,8 @@ function AdminApp() {
     const [loginEmail, setLoginEmail] = useState('');
     const [loginPassword, setLoginPassword] = useState('');
     const [loginPending, setLoginPending] = useState(false);
+    const [localLoginError, setLocalLoginError] = useState('');
+    const [isLocalAuthenticated, setIsLocalAuthenticated] = useState(() => !isApiConfigured && localStorage.getItem(LOCAL_ADMIN_SESSION_KEY) === 'true');
     const [activeUserId, setActiveUserId] = useState(() => localStorage.getItem('field-notes.role-preview') || 'user-owner');
     const [section, setSection] = useState('overview');
     const [postSearch, setPostSearch] = useState('');
@@ -50,6 +55,37 @@ function AdminApp() {
     useEffect(() => {
         if (!sectionAllowed) setSection(allowedSection);
     }, [activeRole?.id, activeRole?.permissions, allowedSection, sectionAllowed]);
+
+    useEffect(() => {
+        if (!notice) return;
+        const timeoutId = window.setTimeout(() => setNotice(''), 4000);
+        return () => window.clearTimeout(timeoutId);
+    }, [notice]);
+
+    useEffect(() => {
+        if (!localLoginError) return;
+        const timeoutId = window.setTimeout(() => setLocalLoginError(''), 4000);
+        return () => window.clearTimeout(timeoutId);
+    }, [localLoginError]);
+
+    useEffect(() => {
+        if (!apiError || apiErrorStatus === 401) return;
+        const timeoutId = window.setTimeout(() => {
+            setApiError('');
+            setApiErrorStatus(0);
+        }, 5000);
+        return () => window.clearTimeout(timeoutId);
+    }, [apiError, apiErrorStatus]);
+
+    const formatApiMessage = (error) => {
+        if (!error) return 'Something went wrong. Please try again.';
+        if (error.status === 401) return 'Your session expired or the credentials are invalid.';
+        if (error.status === 403) return 'This account does not have permission to access this section.';
+        if (error.status === 404) return 'The requested admin resource could not be found.';
+        if (error.status >= 500) return 'The server is currently unavailable. Please try again in a moment.';
+        if (typeof error.message === 'string' && error.message.trim()) return error.message;
+        return 'Something went wrong. Please try again.';
+    };
 
     const refreshWorkspace = async () => {
         if (!isApiConfigured) return;
@@ -351,7 +387,27 @@ function AdminApp() {
         setNotice('Activity log cleared.');
     };
 
+    const submitLocalLogin = (event) => {
+        event.preventDefault();
+        const trimmedEmail = loginEmail.trim().toLowerCase();
+        const trimmedPassword = loginPassword.trim();
+        if (trimmedEmail !== LOCAL_ADMIN_EMAIL.toLowerCase() || trimmedPassword !== LOCAL_ADMIN_PASSWORD) {
+            setLocalLoginError('Invalid email or password. Please try the admin credentials again.');
+            return;
+        }
+        localStorage.setItem(LOCAL_ADMIN_SESSION_KEY, 'true');
+        setIsLocalAuthenticated(true);
+        setLocalLoginError('');
+        setLoginPassword('');
+        setActiveUserId('user-owner');
+        setNotice('Signed in to the admin workspace.');
+    };
+
     const submitLogin = async (event) => {
+        if (!isApiConfigured) {
+            submitLocalLogin(event);
+            return;
+        }
         event.preventDefault();
         setLoginPending(true);
         try {
@@ -359,27 +415,54 @@ function AdminApp() {
             await refreshWorkspace();
             setLoginPassword('');
         } catch (error) {
-            setApiError(error.message);
-            setApiErrorStatus(error.status || 0);
+            const message = formatApiMessage(error);
+            setApiError(message);
+            setApiErrorStatus(error?.status || 0);
         } finally {
             setLoginPending(false);
         }
     };
 
     const handleSignOut = async () => {
+        if (!isApiConfigured) {
+            localStorage.removeItem(LOCAL_ADMIN_SESSION_KEY);
+            setIsLocalAuthenticated(false);
+            setLocalLoginError('');
+            setLoginEmail('');
+            setLoginPassword('');
+            setNotice('Signed out of the admin workspace.');
+            return;
+        }
         try {
             await signOut();
             setServerSession(null);
             setApiError('Sign in to access the editorial workspace.');
             setApiErrorStatus(401);
         } catch (error) {
-            setNotice(`Could not sign out: ${error.message}`);
+            setNotice(`Could not sign out: ${formatApiMessage(error)}`);
         }
     };
 
     const goTo = (id) => {
         if (navigation.find((item) => item.id === id && hasPermission(item.permission))) setSection(id);
     };
+
+    if (!isApiConfigured && !isLocalAuthenticated) {
+        return <div className="admin-shell">
+            <main className="admin-main">
+                <div className="api-error" role="alert">
+                    <strong>Admin access locked</strong>
+                    <p>Use the workspace credentials to continue.</p>
+                    <form className="login-form" onSubmit={submitLogin}>
+                        <label>Email<input type="email" autoComplete="username" required value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} /></label>
+                        <label>Password<input type="password" autoComplete="current-password" required value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></label>
+                        {localLoginError && <p className="form-message" role="alert">{localLoginError}</p>}
+                        <button type="submit" disabled={loginPending}>{loginPending ? 'Signing in…' : 'Sign in'}</button>
+                    </form>
+                </div>
+            </main>
+        </div>;
+    }
 
     return <div className="admin-shell">
         <aside className="admin-sidebar">
@@ -393,7 +476,7 @@ function AdminApp() {
         <main className="admin-main">
             <header className="admin-topbar"><div className="breadcrumbs"><span>Workspace</span><span>/</span><strong>{navigation.find((item) => item.id === section)?.label || 'Overview'}</strong></div><div className="topbar-tools">{isApiConfigured ? <><span className="signed-in-label">{activeUser ? `Signed in as ${activeUser.name}` : 'Backend session'}</span>{serverSession && <button className="sign-out-action" onClick={handleSignOut}>Sign out</button>}</> : <label className="role-preview">Preview role<select aria-label="Preview access as user" value={activeUserId} onChange={(event) => { setActiveUserId(event.target.value); localStorage.setItem('field-notes.role-preview', event.target.value); }}><option value="">No user</option>{data.users.map((user) => <option value={user.id} key={user.id}>{user.name} · {data.roles.find((role) => role.id === user.roleId)?.name}</option>)}</select></label>}{activeUser && <span className="admin-avatar">{activeUser.name.split(' ').map((part) => part[0]).join('')}</span>}</div></header>
 
-            <div className="local-warning"><span aria-hidden="true">!</span><p>{isApiConfigured ? <><strong>Backend mode</strong> This portal uses the configured API; the server must authenticate sessions and authorize every admin operation.</> : <><strong>Local demo workspace</strong> Data is stored in this browser only. Role controls are for preview; there is no server authentication or shared database.</>}</p></div>
+            <div className="local-warning"><span aria-hidden="true">!</span><p>{isApiConfigured ? <><strong>Backend mode</strong> This portal uses the configured API; the server must authenticate sessions and authorize every admin operation.</> : <><strong>Local workspace</strong> Access is protected with the temporary admin login.</>}</p></div>
             {notice && <div className="admin-notice" role="status">{notice}<button aria-label="Dismiss message" onClick={() => setNotice('')}>×</button></div>}
             {apiLoading && <div className="api-loading">Loading admin workspace…</div>}
             {apiError && <div className="api-error" role="alert">{apiError}{apiErrorStatus === 401 && <form className="login-form" onSubmit={submitLogin}><label>Email<input type="email" autoComplete="username" required value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} /></label><label>Password<input type="password" autoComplete="current-password" required value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></label><button type="submit" disabled={loginPending}>{loginPending ? 'Signing in…' : 'Sign in'}</button></form>}{apiErrorStatus !== 401 && <button onClick={() => { setApiLoading(true); refreshWorkspace().catch((error) => { setApiError(error.message); setApiErrorStatus(error.status || 0); }).finally(() => setApiLoading(false)); }}>Retry connection</button>}</div>}

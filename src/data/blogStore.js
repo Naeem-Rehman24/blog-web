@@ -25,7 +25,7 @@ export const permissionCatalog = [
 const allPermissions = permissionCatalog.map(({ id }) => id);
 const initialAdminData = {
   users: [
-    { id: 'user-owner', name: 'Riley Chen', email: 'riley@example.com', roleId: 'owner', status: 'active', joinedAt: '2026-02-12' },
+    { id: 'user-owner', name: 'Naeem Shar', email: 'naeemshar127@gmail.com', roleId: 'owner', status: 'active', joinedAt: '2026-02-12' },
     { id: 'user-editor', name: 'Mira Sol', email: 'mira@example.com', roleId: 'editor', status: 'active', joinedAt: '2026-03-08' },
     { id: 'user-author', name: 'Theo Park', email: 'theo@example.com', roleId: 'author', status: 'active', joinedAt: '2026-04-19' },
     { id: 'user-reader', name: 'Jules Martin', email: 'jules@example.com', roleId: 'reader', status: 'invited', joinedAt: '2026-06-02' },
